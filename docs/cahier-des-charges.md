@@ -1,10 +1,7 @@
 # Cahier des charges — SportBillet MTL
 
-**Auteur** : Fabiola Sainvry
-**Cours** : 420-951-MA Applications Web transactionnelles
-**Session** : Automne 2026, Groupe 25604
-**Date** : 23 novembre 2026
-**Mode** : Seul (10 user stories, paiement unique)
+**Auteur** : Fabiola Sainvry, Maxance Zeka
+
 
 ---
 
@@ -55,7 +52,7 @@
 | **Showpass** | Billetterie canadienne événementielle | 2,5 % + 1,50 $ par billet | Pas de sport local, surtout concerts et festivals |
 
 ### 1.4 Positionnement
-**Nyx billets| Apex billets| Centurionsport billets | SportBillet MTL est la billetterie québécoise pensée pour les événements sportifs locaux, avec des frais fixes bas, une interface bilingue et un contrôle d'entrée par QR code intégré.**
+** Centurionsport billeteries MTL est la billetterie québécoise pensée pour les événements sportifs locaux, avec des frais fixes bas, une interface bilingue et un contrôle d'entrée par QR code intégré.**
 
 ---
 
@@ -180,6 +177,216 @@ Chaque utilisateur reçoit un code de parrainage unique à la création de son c
 **Exemple concret — filleul**
 
 **Parcours**
-- Le filleul voit : bannière verte "🎁 10 % offerts grâce à `FAB-A3K7`" dans le panier, ligne explicite "Rabais parrainage" dans le récapitulatif
+- Le filleul voit : bannière verte " 10 % offerts grâce à `FAB-A3K7`" dans le panier, ligne explicite "Rabais parrainage" dans le récapitulatif
 - Le parrain voit : notification par courriel + ligne dans son compte "Crédit 20,00 $ disponible (expire le 22 fév. 2027)"
 - Le système fait : vérifie l'unicité du code, vérifie que le filleul n'a jamais acheté, applique le rabais avant calcul des frais et taxes, crée une entrée `Referral` liée aux deux comptes, génère le `CreditLedger` du parrain au moment du webhook payé
+
+## 4. User stories, critères d'acceptation et cas d'utilisation <a id="4-user-stories"></a>
+
+### 4.1 User stories (priorisées MoSCoW — mode solo, 10 minimum)
+
+| ID | Priorité | User story |
+|---|---|---|
+| **US-01** | Must | En tant que **visiteur**, je veux **parcourir le catalogue d'événements sans créer de compte**, afin de **voir rapidement ce qui m'intéresse**. |
+| **US-02** | Must | En tant que **nouvel utilisateur**, je veux **créer un compte avec mon courriel ou mon compte Google**, afin de **pouvoir acheter des billets rapidement**. |
+| **US-03** | Must | En tant qu'**utilisateur connecté**, je veux **acheter un billet pour un événement avec ma carte de crédit via Stripe**, afin de **réserver ma place**. |
+| **US-04** | Must | En tant qu'**acheteur**, je veux **recevoir mon billet avec un code QR unique par courriel immédiatement après le paiement**, afin de **le présenter à l'entrée**. |
+| **US-05** | Must | En tant qu'**utilisateur**, je veux **consulter tous mes billets passés et à venir dans mon compte**, afin de **retrouver mes achats**. |
+| **US-06** | Must | En tant qu'**acheteur**, je veux **demander un remboursement jusqu'à 48 h avant l'événement**, afin de **récupérer mon argent si je ne peux plus y aller**. |
+| **US-07** | Must | En tant que **système**, je veux **traiter les webhooks Stripe signés et mettre à jour les commandes de manière idempotente**, afin de **garantir qu'aucune commande n'est payée deux fois ni oubliée**. |
+| **US-08** | Should | En tant que **visiteur**, je veux **filtrer les événements par sport, date et ville**, afin de **trouver rapidement ce qui me concerne**. |
+| **US-09** | Should | En tant que **nouveau client**, je veux **appliquer un code de parrainage pour obtenir 10 % de rabais sur ma première commande**, afin d'**économiser à mon premier achat**. |
+| **US-10** | Should | En tant que **parrain**, je veux **recevoir automatiquement un crédit de 15 % (max 20 $) sur ma prochaine commande quand mon filleul complète son premier paiement**, afin d'**être récompensé pour mes recommandations**. |
+| **US-11** | Could | En tant qu'**organisateur**, je veux **publier un événement avec titre, date, lieu, capacité et prix**, afin de **vendre mes billets sur la plateforme**. |
+| **US-12** | Won't (v1) | En tant qu'**utilisateur mobile**, je veux **une application iOS/Android native**, afin d'**accéder à mes billets hors ligne**. *(Reporté : la v1 est web responsive avec PWA.)* |
+
+### 4.2 Critères d'acceptation testables (format Gherkin — Étant donné / Quand / Alors)
+
+**AC-01 — Achat réussi** (lié à US-03, US-04)
+- Étant donné un utilisateur connecté avec un billet dans son panier
+- Quand il complète le paiement sur Stripe Checkout avec une carte valide (`4242 4242 4242 4242`)
+- Alors la commande passe de `PENDING` à `PAID` après réception du webhook, un billet avec QR unique est généré, et un courriel de confirmation est envoyé sous 30 secondes
+
+**AC-02 — Carte refusée** (échec, lié à US-03)
+- Étant donné un utilisateur en train de payer
+- Quand il saisit une carte refusée par la banque (`4000 0000 0000 0002`)
+- Alors Stripe retourne une erreur `card_declined`, la commande reste `PENDING`, aucun billet n'est émis, et l'utilisateur voit un message "Votre carte a été refusée"
+
+**AC-03 — Événement complet** (échec, lié à US-03)
+- Étant donné un événement dont la capacité est atteinte
+- Quand un utilisateur tente d'ajouter un billet au panier
+- Alors le bouton "Acheter" est désactivé et affiche "Complet", et une tentative directe via l'API retourne une erreur `409 CONFLICT`
+
+**AC-04 — Remboursement accepté** (lié à US-06)
+- Étant donné une commande `PAID` pour un événement dans plus de 48 h
+- Quand l'utilisateur clique sur "Demander un remboursement" depuis son compte
+- Alors un remboursement Stripe est initié, la commande passe à `REFUNDED`, les billets associés sont invalidés, et l'utilisateur reçoit un courriel de confirmation
+
+**AC-05 — Remboursement refusé — délai dépassé** (échec, lié à US-06, RM-06)
+- Étant donné une commande `PAID` pour un événement dans moins de 48 h
+- Quand l'utilisateur tente de demander un remboursement
+- Alors le bouton est désactivé avec le message "Remboursement impossible : délai de 48 h dépassé", et toute requête directe à l'API retourne `422 UNPROCESSABLE_ENTITY`
+
+**AC-06 — Webhook valide traité une seule fois** (lié à US-07, RM-08)
+- Étant donné un webhook `checkout.session.completed` avec signature Stripe valide
+- Quand il est reçu pour la première fois
+- Alors la commande correspondante passe à `PAID` et l'événement est enregistré dans `WebhookEvent` ; un second webhook avec le même `event.id` est ignoré sans effet (idempotence)
+
+**AC-07 — Webhook à signature invalide rejeté** (échec, lié à US-07)
+- Étant donné un webhook avec un corps modifié ou une signature absente
+- Quand le serveur le reçoit
+- Alors il répond `400 BAD REQUEST`, aucune donnée n'est modifiée, et l'erreur est journalisée
+
+**AC-08 — Code de parrainage déjà utilisé** (échec, lié à US-09, RM-12)
+- Étant donné un utilisateur qui a déjà passé une commande
+- Quand il saisit un code de parrainage valide dans le panier
+- Alors le code est refusé avec le message "Le parrainage est réservé à votre première commande"
+
+**AC-09 — Crédit parrain émis au webhook payé** (lié à US-10, RM-13)
+- Étant donné un filleul dont la commande vient de recevoir le webhook `checkout.session.completed`
+- Quand le système traite le webhook
+- Alors un `CreditLedger` de 15 % (max 2000 cents) est créé au nom du parrain, avec expiration 90 jours plus tard, et un courriel de notification est envoyé
+
+**AC-10 — Code promo non cumulable** (échec, lié à RM-16)
+- Étant donné un panier avec un rabais parrainage déjà appliqué
+- Quand l'utilisateur tente d'ajouter un code promo marketing
+- Alors le second rabais est refusé avec le message "Les rabais ne sont pas cumulables"
+
+### 4.3 Diagramme de cas d'utilisation
+
+```mermaid
+flowchart LR
+    Visiteur((Visiteur))
+    Utilisateur((Utilisateur))
+    Organisateur((Organisateur))
+    Stripe((Stripe<br/>acteur système))
+
+    Visiteur --> UC1[Parcourir le catalogue]
+    Visiteur --> UC2[Filtrer par sport]
+    Visiteur --> UC3[Créer un compte]
+
+    Utilisateur --> UC4[Acheter un billet]
+    Utilisateur --> UC5[Consulter mes billets]
+    Utilisateur --> UC6[Demander un remboursement]
+    Utilisateur --> UC7[Appliquer un code de parrainage]
+    Utilisateur --> UC8[Partager mon code]
+
+    Organisateur --> UC9[Publier un événement]
+    Organisateur --> UC10[Scanner un QR à l'entrée]
+
+    UC4 -. include .-> UC11[Payer via Stripe Checkout]
+    UC4 -. include .-> UC12[Calculer taxes TPS/TVQ]
+    UC4 -. extend .-> UC7
+    UC11 -. include .-> UC13[Vérifier signature webhook]
+    UC6 -. include .-> UC14[Rembourser via Stripe Refund]
+
+    UC11 --> Stripe
+    UC14 --> Stripe
+```
+
+### 4.4 Description détaillée du cas d'utilisation **« Payer »**
+
+| Champ | Valeur |
+|---|---|
+| **Nom** | Payer un billet |
+| **Acteur principal** | Utilisateur connecté |
+| **Acteur système** | Stripe (service de paiement) |
+| **Préconditions** | L'utilisateur est authentifié, a au moins 1 billet dans son panier, l'événement n'est pas complet |
+| **Postconditions (succès)** | Une commande `PAID` existe en BD ; des `Ticket` avec QR uniques sont générés ; un courriel de confirmation est envoyé |
+| **Postconditions (échec)** | Aucune donnée persistée côté commande au-delà d'un `Order` à `PENDING` ou `EXPIRED` |
+| **Scénario nominal** | 1. L'utilisateur clique « Passer au paiement » dans le panier. 2. Le serveur crée un `Order` à `PENDING` et une session Stripe Checkout. 3. L'utilisateur est redirigé sur Stripe et saisit sa carte (Apple Pay / Google Pay / carte). 4. Stripe traite le paiement et redirige vers la page de confirmation. 5. Stripe envoie en parallèle le webhook `checkout.session.completed` signé. 6. Le serveur vérifie la signature, consulte `WebhookEvent` pour l'idempotence, passe l'`Order` à `PAID`, génère les `Ticket`, envoie le courriel. |
+| **Scénario alternatif a (carte refusée)** | 3a. Stripe refuse la carte. L'utilisateur voit le message d'erreur et est invité à réessayer. L'`Order` reste `PENDING` et expirera après 15 min. |
+| **Scénario alternatif b (webhook perdu)** | 5b. Si le webhook n'arrive pas en 5 min, un job de réconciliation interroge Stripe via `checkout.sessions.retrieve` et met à jour l'`Order`. |
+| **Règles métier** | RM-01, RM-02, RM-04, RM-05, RM-08 |
+
+## 5. Diagrammes de classes et de séquence <a id="5-diagrammes"></a>
+
+### 5.1 Diagramme de classes
+
+Les diagrammes complets sont dans [`docs/classes.md`](./classes.md). Voici un résumé des classes principales et de ce qu'elles font :
+
+- **User** — Un utilisateur du site. Il a un courriel, un nom, un code de parrainage unique. Il peut passer plusieurs commandes.
+- **Organizer** — Un organisateur d'événements (gym, promoteur). Il a un identifiant Stripe pour recevoir ses paiements.
+- **Venue** — Le lieu où se déroule l'événement (ex. Centre Pierre-Charbonneau). Un lieu peut accueillir plusieurs événements.
+- **Event** — Un événement sportif (titre, date, lieu, capacité, prix en cents). Chaque événement a un statut (brouillon, publié, complet, annulé).
+- **Order** — Une commande passée par un utilisateur. Elle contient le sous-total, les frais, les taxes (TPS et TVQ) et le total, tous en cents. Elle a un statut (en attente, payée, expirée, annulée, remboursée).
+- **OrderItem** — Une ligne de commande qui fige le prix et le titre de l'événement au moment de l'achat (c'est le patron "commande figée").
+- **Ticket** — Un billet avec un QR code unique. Son statut peut être valide, utilisé, remboursé ou révoqué.
+- **Refund** — Un remboursement associé à une commande. Il garde l'identifiant Stripe du remboursement.
+- **WebhookEvent** — Un journal des webhooks Stripe reçus, pour ne pas traiter le même événement deux fois.
+- **Referral** — Une relation de parrainage entre deux utilisateurs (un parrain, un filleul).
+- **CreditLedger** — Un crédit disponible pour un utilisateur (gagné par parrainage ou donné en compensation).
+
+**Règles importantes des diagrammes** :
+- Tous les montants sont en **cents** (entiers), jamais en décimales.
+- Les relations vers `Order` utilisent `onDelete: Restrict` : on n'efface jamais une commande.
+- Les identifiants Stripe (`stripeSessionId`, `stripeRefundId`, etc.) sont uniques pour éviter les doublons.
+
+### 5.2 Diagramme de séquence du paiement
+
+Le diagramme Mermaid complet est dans [`docs/classes.md`](./classes.md). En mots :
+
+1. L'utilisateur clique sur **« Passer au paiement »** dans le panier.
+2. Notre serveur crée une commande avec le statut `PENDING` dans la base, puis demande à Stripe de créer une session Checkout.
+3. L'utilisateur est redirigé sur **Stripe** et entre sa carte (ou Apple Pay / Google Pay).
+4. Stripe traite le paiement et renvoie l'utilisateur sur notre page de confirmation.
+5. **En parallèle**, Stripe envoie un **webhook signé** à notre serveur.
+6. Notre serveur **vérifie la signature** du webhook (sinon il le rejette).
+7. Il vérifie aussi que ce webhook n'a pas déjà été traité (table `WebhookEvent`).
+8. Si tout est bon, il passe la commande à `PAID`, génère les billets avec QR code et envoie le courriel.
+
+**Point clé** : la commande n'est jamais confirmée par le navigateur. Elle est confirmée seulement par le webhook signé. Ça évite qu'un utilisateur triche en modifiant la page de confirmation.
+
+---
+
+## 6. Maquettes <a id="6-maquettes"></a>
+
+Les 6 maquettes des écrans sont dans [`docs/maquettes/`](./maquettes/) (fichiers PNG). Le code HTML source est dans [`docs/maquettes.html`](./maquettes.html).
+
+**Les 6 écrans** :
+
+1. **Accueil** (`accueil.png`) — Barre de recherche, événements à venir triés par date, cartes avec sport, lieu, prix.
+2. **Tarifs** (`tarifs.png`) — Les 3 plans : Gratuit (navigation), Par billet (1,50 $ + 3 %), Organisateur sur mesure.
+3. **Panier** (`panier.png`) — Détail des billets dans le panier avec **le prix avant taxes, les frais, la TPS (5 %), la TVQ (9,975 %) et le total** bien visibles.
+4. **Paiement** (`paiement.png`) — Formulaire de paiement **avec un état d'erreur « carte refusée »** affiché en rouge. Les boutons Apple Pay et Google Pay sont visibles.
+5. **Confirmation** (`confirmation.png`) — Billet avec QR code, numéro de commande, détail des montants payés (sous-total, frais, TPS, TVQ, total).
+6. **Compte** (`compte.png`) — Historique des billets de l'utilisateur, bouton pour voir le QR, bouton pour demander un remboursement.
+
+**Choix de design** :
+- Thème sombre pour un style sportif / combat.
+- Orange et rouge pour les accents (rappelle les gants de boxe et les gyms de MMA).
+- Les montants et les taxes sont toujours visibles pour que l'acheteur sache exactement ce qu'il paie.
+
+---
+
+## 7. Schéma de base de données <a id="7-schéma-bd"></a>
+
+Le schéma complet est dans [`prisma/schema.prisma`](../prisma/schema.prisma) et la première migration est dans [`prisma/migrations/`](../prisma/migrations/).
+
+### 7.1 Les tables principales
+
+- **User, Organizer, Venue, Event** — les tables "catalogue" (qui, où, quoi)
+- **Order, OrderItem, Ticket, Refund** — les tables "transactionnelles" (achats et remboursements)
+- **WebhookEvent** — le journal des webhooks Stripe pour l'idempotence
+- **Referral, DiscountCode, CreditLedger** — le système de parrainage et de crédits
+
+### 7.2 Respect de la checklist de la semaine 3
+
+| # | Patron | Comment on le respecte |
+|---|---|---|
+| 1 | Entiers en cents | Tous les montants sont `Int` et nommés avec le suffixe `Cents` (ex. `priceCents`, `totalCents`). |
+| 2 | Produit et prix séparés | Le prix de l'événement est copié dans `OrderItem.unitPriceCents` au moment de l'achat. |
+| 3 | Commande figée | `OrderItem` garde aussi le titre de l'événement (`eventTitle`), pour que ça ne change jamais même si l'événement est modifié. |
+| 4 | Machine à états | Les statuts (`OrderStatus`, `TicketStatus`, etc.) sont des **enums**, jamais du texte libre. |
+| 5 | Abonnement | Pas d'abonnement dans notre projet (paiement unique). |
+| 6 | On n'efface jamais | Les relations vers `Order` utilisent `onDelete: Restrict`. Les remboursements sont dans une table `Refund` séparée. |
+| 7 | Journal des webhooks | Table `WebhookEvent` avec `id String @id` **sans `@default`** — on utilise l'id de Stripe pour détecter les doublons. |
+| 8 | Identifiants externes | Tous les champs Stripe (`stripeSessionId`, `stripeRefundId`, `stripeAccountId`) sont `String? @unique`. |
+| + | Index | On a mis un `@@index` sur toutes les clés étrangères et sur les champs souvent filtrés (`status`, `sport`, `startsAt`, `createdAt`). |
+| + | Contrainte CHECK | Dans la migration SQL, on ajoute une contrainte `CHECK (totalCents = subtotalCents + feesCents + gstCents + qstCents - discountCents)` pour forcer la règle métier **RM-04** (le total doit toujours correspondre à la somme des morceaux). |
+
+### 7.3 Pourquoi ces choix
+
+- **En cents, pas en dollars** : les nombres à virgule flottante causent des erreurs de calcul en argent (ex. `0.1 + 0.2 ≠ 0.3`). Les entiers en cents évitent ça.
+- **`onDelete: Restrict`** : on ne veut jamais perdre l'historique d'une commande, même par accident.
+- **WebhookEvent sans `@default`** : si Stripe nous envoie deux fois le même webhook (ça arrive), on le détecte parce que l'id existe déjà dans la table.
